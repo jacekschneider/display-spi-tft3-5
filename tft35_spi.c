@@ -316,38 +316,33 @@ MODULE_DEVICE_TABLE(spi, tft35_id_table);
 static int tft35_probe(struct spi_device *spi)
 {
     /* Create the main structure */
-    struct tft35 *ctx =  spi_get_drvdata(spi);
+    struct drm_device *drm;
+    struct tft35 *ctx;
     struct device *dev = &spi->dev; // Use ctx->dev directly.
     int err_code;
     
-    ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
-    if(!ctx)
-        return -ENOMEM;
+    drm = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
+    if (IS_ERR(drm))
+        return PTR_ERR(drm);
+
+    ctx = container_of(drm, struct tft35, dev_drm);
+    spi_set_drvdata(spi, ctx);
 
     ctx->dev = &spi->dev;
     ctx->spi = spi;
+    ctx->pdev_drm = drm;
+
+    drm_mode_config_init(ctx->pdev_drm);
+    ctx->pdev_drm->mode_config.min_width  = 0;
+    ctx->pdev_drm->mode_config.min_height = 0;
+    ctx->pdev_drm->mode_config.max_width  = 480; 
+    ctx->pdev_drm->mode_config.max_height = 320;  
 
     struct drm_connector *connector = &ctx->connector;
     drm_connector_init(ctx->pdev_drm, connector,
                     &tft35_connector_funcs,
                     DRM_MODE_CONNECTOR_SPI);
     drm_connector_helper_add(connector, &tft35_connector_helper_funcs);
-
-
-    struct tft35 *ctx2; 
-    ctx2 = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
-    if (IS_ERR(ctx2))
-    {
-        dev_dbg(dev, "ERROR: Failed devm_drm_dev_alloc\n");
-        return -ENXIO;
-    }
-
-    ctx->pdev_drm = &ctx2->dev_drm;
-    drm_mode_config_init(ctx->pdev_drm);
-    ctx->pdev_drm->mode_config.min_width  = 0;
-    ctx->pdev_drm->mode_config.min_height = 0;
-    ctx->pdev_drm->mode_config.max_width  = 480; 
-    ctx->pdev_drm->mode_config.max_height = 320;  
 
     err_code = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp, &dsdp_funcs, formats, ARRAY_SIZE(formats), NULL, connector);
     if (err_code < 0)
@@ -383,9 +378,6 @@ static int tft35_probe(struct spi_device *spi)
         dev_dbg(dev, "ERROR: Failed drm_dev_register %d\n", err_code);
         return err_code;
     }
-
-
-    spi_set_drvdata(spi, ctx);
 
     err_code=tft35_display_init(ctx);
     if (err_code < 0)
