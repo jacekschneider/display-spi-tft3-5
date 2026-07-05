@@ -35,13 +35,6 @@ struct tft35 {
 };
 
 
-
-static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
-    .enable = tft35_pipe_enable,
-    .disable = tft35_pipe_disable,
-    .update = tft35_pipe_update,
-};
-
 static const struct drm_driver driver_drm = {
     .major = 1,
     .minor = 0,
@@ -119,7 +112,17 @@ static void tft35_fill_color(struct tft35 *ctx, u16 color)
             tft35_write_data16(ctx, color);
 }
 
-int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
+static int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
+{
+    int ret;
+    gpiod_set_value_cansleep(ctx->dc_gpio, 0);
+    ret = spi_write(ctx->spi, buf, data_length);
+    if (ret < 0)
+        dev_err(ctx->dev, "ERROR: Failed tft35_write_buffer %d\n", ret);
+    return ret;
+}
+
+static int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
 {
     int ret;
     /* Set window (column + row address) */
@@ -137,16 +140,6 @@ int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
     /* Send pixel buffer */
     size_t len = width * height * 2;
     ret = tft35_write_buffer(ctx, buf, len);
-    return ret;
-}
-
-static int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
-{
-    int ret;
-    gpiod_set_value_cansleep(ctx->dc_gpio, 0);
-    ret = spi_write(ctx->spi, buf, data_length);
-    if (ret < 0)
-        dev_err(ctx->dev, "ERROR: Failed tft35_write_buffer %d\n", ret);
     return ret;
 }
 
@@ -261,6 +254,11 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
 }
 
+static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
+    .enable = tft35_pipe_enable,
+    .disable = tft35_pipe_disable,
+    .update = tft35_pipe_update,
+};
 
 static const struct of_device_id tft35_of_match[] = {
     {.compatible = "schneider,tft35display"},
