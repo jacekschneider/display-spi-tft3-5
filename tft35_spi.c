@@ -34,66 +34,7 @@ struct tft35 {
     size_t tx_buf_size;    
 };
 
-void tft35_pipe_enable(struct drm_simple_display_pipe *pipe,
-		       struct drm_crtc_state *crtc_state,
-		       struct drm_plane_state *plane_state)
-{
-    ;
-}
 
-void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
-{
-    ;
-}
-
-void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
-                       struct drm_plane_state *old_plane_state)
-{
-    struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
-    struct drm_plane_state *pstate = pipe->plane.state;
-    struct drm_framebuffer *fb = pstate->fb;
-    struct drm_rect src = pstate->src;
-
-    int w = src.x2 - src.x1;   // still in 16.16
-    int h = src.y2 - src.y1;
-
-    w >>= 16;   // convert from 16.16
-    h >>= 16;
-
-    struct drm_gem_object *obj;
-    struct drm_gem_shmem_object *shmem;
-    struct iosys_map src, dst;
-    struct drm_rect rect;
-    unsigned int dst_pitch;
-    size_t len;
-    int ret;
-
-    if (!fb)
-    {
-        dev_info(ctx->dev, "ignored a display update\n");
-        return;
-    }
-
-    obj = drm_gem_fb_get_obj(fb, 0);
-    shmem = to_drm_gem_shmem_obj(obj);
-    iosys_map_set_vaddr(&src, shmem->vaddr);
-    iosys_map_set_vaddr(&dst, ctx->tx_buf);
-
-    dst_pitch = w * 2;
-
-    rect.x1 = 0;
-    rect.y1 = 0;
-    rect.x2 = w;
-    rect.y2 = h;
-
-    drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
-
-    len = w * h * 2;
-
-    ret = tft35_write_buffer(ctx, ctx->tx_buf, len);
-    if (ret)
-        dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
-}
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
     .enable = tft35_pipe_enable,
@@ -257,6 +198,67 @@ int tft35_display_init(struct tft35 *ctx)
     msleep(255);
     ret=tft35_write_cmd(ctx, 0x29);
     return ret;
+}
+
+void tft35_pipe_enable(struct drm_simple_display_pipe *pipe,
+		       struct drm_crtc_state *crtc_state,
+		       struct drm_plane_state *plane_state)
+{
+    ;
+}
+
+void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
+{
+    ;
+}
+
+void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
+                       struct drm_plane_state *old_plane_state)
+{   
+    dev_info(ctx->dev, "tft35_pipe_update - 0");
+    struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
+    struct drm_plane_state *pstate = pipe->plane.state;
+    struct drm_framebuffer *fb = pstate->fb;
+    struct drm_rect src_rect = pstate->src;
+
+    int w = src_rect.x2 - src_rect.x1;   // still in 16.16
+    int h = src_rect.y2 - src_rect.y1;
+
+    w >>= 16;   // convert from 16.16
+    h >>= 16;
+    dev_info(ctx->dev, "tft35_pipe_update - 1");
+    struct drm_gem_object *obj;
+    struct drm_gem_shmem_object *shmem;
+    struct iosys_map src, dst;
+    struct drm_rect rect;
+    unsigned int dst_pitch;
+    size_t len;
+    int ret;
+
+    if (!fb)
+    {
+        dev_info(ctx->dev, "ignored a display update\n");
+        return;
+    }
+    dev_info(ctx->dev, "tft35_pipe_update - 2");
+    obj = drm_gem_fb_get_obj(fb, 0);
+    shmem = to_drm_gem_shmem_obj(obj);
+    iosys_map_set_vaddr(&src, shmem->vaddr);
+    iosys_map_set_vaddr(&dst, ctx->tx_buf);
+
+    dst_pitch = w * 2;
+
+    rect.x1 = 0;
+    rect.y1 = 0;
+    rect.x2 = w;
+    rect.y2 = h;
+    dev_info(ctx->dev, "tft35_pipe_update - 3");
+    drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
+
+    len = w * h * 2;
+    ret = tft35_write_buffer(ctx, ctx->tx_buf, len);
+    if (ret)
+        dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
 }
 
 
