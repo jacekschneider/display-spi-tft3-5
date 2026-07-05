@@ -321,12 +321,10 @@ static int tft35_probe(struct spi_device *spi)
     struct device *dev = &spi->dev; // Use ctx->dev directly.
     int err_code;
     
-    drm = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
-    if (IS_ERR(drm))
-        return PTR_ERR(drm);
-
-    ctx = container_of(drm, struct tft35, dev_drm);
-    spi_set_drvdata(spi, ctx);
+    ctx = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
+    if (IS_ERR(ctx))
+    return PTR_ERR(ctx);
+    drm = &ctx->dev_drm;
 
     ctx->dev = &spi->dev;
     ctx->spi = spi;
@@ -378,6 +376,8 @@ static int tft35_probe(struct spi_device *spi)
         dev_dbg(dev, "ERROR: Failed drm_dev_register %d\n", err_code);
         return err_code;
     }
+    
+    spi_set_drvdata(spi, ctx);
 
     err_code=tft35_display_init(ctx);
     if (err_code < 0)
