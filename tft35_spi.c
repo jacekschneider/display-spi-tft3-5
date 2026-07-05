@@ -250,8 +250,7 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     dev_info(ctx->dev, "tft35_pipe_update - 3");
     drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
 
-    len = w * h * 2;
-    ret = tft35_write_buffer(ctx, ctx->tx_buf, len);
+    ret = tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
     if (ret)
         dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
 }
@@ -280,7 +279,7 @@ static const struct drm_display_mode tft35_default_mode = {
     .vsync_start = 320,
     .vsync_end = 320,
     .vtotal = 320,
-    .vrefresh = 60,
+    .vscan = 60,
     .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
