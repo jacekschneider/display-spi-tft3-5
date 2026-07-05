@@ -13,6 +13,8 @@
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_simple_kms_helper.h>
 #include <drm/drm_gem_framebuffer_helper.h>
+#include <drm/drm_atomic_helper.h>
+#include <drm/drm_probe_helper.h>
 
 #include <uapi/drm/drm_fourcc.h>
 
@@ -260,6 +262,46 @@ static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
     .update = tft35_pipe_update,
 };
 
+static const struct drm_connector_funcs tft35_connector_funcs = {
+    .reset = drm_atomic_helper_connector_reset,
+    .fill_modes = drm_helper_probe_single_connector_modes,
+    .destroy = drm_connector_cleanup,
+    .atomic_destroy_state = drm_atomic_helper_connector_destroy_state,
+    .atomic_duplicate_state = drm_atomic_helper_connector_duplicate_state,
+};
+
+static const struct drm_display_mode tft35_default_mode = {
+    .clock = 9000,
+    .hdisplay = 480,
+    .hsync_start = 480,
+    .hsync_end = 480,
+    .htotal = 480,
+    .vdisplay = 320,
+    .vsync_start = 320,
+    .vsync_end = 320,
+    .vtotal = 320,
+    .vrefresh = 60,
+    .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
+};
+
+static int tft35_get_modes(struct drm_connector *connector)
+{
+    struct drm_display_mode *mode;
+
+    mode = drm_mode_duplicate(connector->dev, &tft35_default_mode);
+    if (!mode)
+        return -ENOMEM;
+
+    drm_mode_set_name(mode);
+    drm_mode_probed_add(connector, mode);
+
+    return 1;   // number of modes added
+}
+
+static const struct drm_connector_helper_funcs tft35_connector_helper_funcs = {
+    .get_modes = tft35_get_modes,   // you must implement this
+};
+
 static const struct of_device_id tft35_of_match[] = {
     {.compatible = "schneider,tft35display"},
     {/* sentinel */}
@@ -285,6 +327,14 @@ static int tft35_probe(struct spi_device *spi)
 
     ctx->dev = &spi->dev;
     ctx->spi = spi;
+
+    struct drm_connector *connector = &ctx->connector;
+    drm_connector_init(ctx->pdev_drm, connector,
+                    &tft35_connector_funcs,
+                    DRM_MODE_CONNECTOR_SPI);
+    drm_connector_helper_add(connector, &tft35_connector_helper_funcs);
+
+
     struct tft35 *ctx2; 
     ctx2 = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
     if (IS_ERR(ctx2))
@@ -294,14 +344,13 @@ static int tft35_probe(struct spi_device *spi)
     }
 
     ctx->pdev_drm = &ctx2->dev_drm;
-
     drm_mode_config_init(ctx->pdev_drm);
     ctx->pdev_drm->mode_config.min_width  = 0;
     ctx->pdev_drm->mode_config.min_height = 0;
     ctx->pdev_drm->mode_config.max_width  = 480; 
     ctx->pdev_drm->mode_config.max_height = 320;  
 
-    err_code = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp, &dsdp_funcs, formats, ARRAY_SIZE(formats), NULL, NULL);
+    err_code = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp, &dsdp_funcs, formats, ARRAY_SIZE(formats), NULL, connector);
     if (err_code < 0)
     {
         dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err_code);
