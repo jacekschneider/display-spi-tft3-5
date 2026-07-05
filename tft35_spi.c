@@ -12,6 +12,7 @@
 #include <drm/drm_format_helper.h>
 #include <drm/drm_gem_shmem_helper.h>
 #include <drm/drm_simple_kms_helper.h>
+#include <drm/drm_gem_framebuffer_helper.h>
 
 #include <uapi/drm/drm_fourcc.h>
 
@@ -28,6 +29,9 @@ struct tft35 {
     struct spi_device *spi;
     struct gpio_desc *dc_gpio;
     struct gpio_desc *reset_gpio;
+
+    void *tx_buf;          
+    size_t tx_buf_size;    
 };
 
 void tft35_pipe_enable(struct drm_simple_display_pipe *pipe,
@@ -43,9 +47,45 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
 }
 
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
-		       struct drm_plane_state *old_plane_state)
+                       struct drm_plane_state *old_plane_state)
 {
-    ;
+    struct tft35 *ctx = container_of(pipe, struct tft35, pipe);
+    struct drm_plane_state *pstate = pipe->plane.state;
+    struct drm_framebuffer *fb = pstate->fb;
+
+    struct drm_gem_object *obj;
+    struct drm_gem_shmem_object *shmem;
+    struct iosys_map src, dst;
+    struct drm_rect rect;
+    unsigned int dst_pitch;
+    size_t len;
+    int ret;
+
+    if (!fb)
+    {
+        dev_info(ctx->dev, "ignored a display update\n");
+        return;
+    }
+
+    obj = drm_gem_fb_get_obj(fb, 0);
+    shmem = to_drm_gem_shmem_obj(obj);
+    iosys_map_set_vaddr(&src, shmem->vaddr);
+    iosys_map_set_vaddr(&dst, ctx->tx_buf);
+
+    dst_pitch = fb->width * 2;
+
+    rect.x1 = 0;
+    rect.y1 = 0;
+    rect.x2 = fb->width;
+    rect.y2 = fb->height;
+
+    drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
+
+    len = fb->width * fb->height * 2;
+
+    ret = tft35_write_buffer(ctx, ctx->tx_buf, len);
+    if (ret)
+        dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
 }
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
@@ -85,13 +125,13 @@ int tft35_write_cmd(struct tft35 *ctx, uint8_t cmd)
     return ret;
 }
 
-int tft35_write_data(struct tft35 *ctx, uint8_t *data, int data_lenght)
+int tft35_write_data(struct tft35 *ctx, uint8_t *data, size_t data_lenght)
 {
     gpiod_set_value_cansleep(ctx->dc_gpio, 1);
     return spi_write(ctx->spi, data, data_lenght);
 }
 
-int tft35_write_cmd_data(struct tft35 *ctx, uint8_t cmd, uint8_t *data, int data_length)
+int tft35_write_cmd_data(struct tft35 *ctx, uint8_t cmd, uint8_t *data, size_t data_length)
 {
     int ret;
     ret = tft35_write_cmd(ctx, cmd);
@@ -129,6 +169,37 @@ static void tft35_fill_color(struct tft35 *ctx, u16 color)
     for (y = 0; y < 320; y++)
         for (x = 0; x < 480; x++)
             tft35_write_data16(ctx, color);
+}
+
+int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
+{
+    int ret;
+    /* Set window (column + row address) */
+    tft35_write_cmd(ctx, 0x2A);
+    tft35_write_data16(ctx, 0);
+    tft35_write_data16(ctx, width - 1);
+
+    tft35_write_cmd(ctx, 0x2B);
+    tft35_write_data16(ctx, 0);
+    tft35_write_data16(ctx, height - 1);
+
+    // Memory write
+    tft35_write_cmd(ctx, 0x2C);
+
+    /* Send pixel buffer */
+    size_t len = width * height * 2;
+    ret = tft35_write_buffer(ctx, buf, len);
+    return ret;
+}
+
+static inline int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
+{
+    int ret;
+    gpiod_set_value_cansleep(ctx->dc_gpio, 0);
+    ret = spi_write(ctx->spi, buf, data_length);
+    if (ret < 0)
+        dev_err(ctx->dev, "ERROR: Failed tft35_write_buffer %d\n", ret);
+    return ret;
 }
 
 // init sequence
@@ -230,6 +301,11 @@ static int tft35_probe(struct spi_device *spi)
         return err_code;
     }
 
+    ctx->tx_buf_size = 480 * 320 * 2;
+    ctx->tx_buf = devm_kmalloc(dev, ctx->tx_buf_size, GFP_KERNEL);
+    if (!ctx->tx_buf)
+        return -ENOMEM;
+
     ctx->dc_gpio = devm_gpiod_get(dev, "dc", GPIOD_OUT_HIGH);
     if(IS_ERR(ctx->dc_gpio))
     {
@@ -268,7 +344,8 @@ static int tft35_probe(struct spi_device *spi)
 
 static void tft35_remove(struct spi_device *spi)
 {
-    ;
+    struct tft35 *ctx = spi_get_drvdata(spi);
+    drm_dev_unregister(ctx->pdev_drm);
 }
 
 static struct spi_driver tft35_spi_driver = {
