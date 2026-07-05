@@ -215,8 +215,8 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
                        struct drm_plane_state *old_plane_state)
 {   
-    dev_info(ctx->dev, "tft35_pipe_update - 0");
     struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
+    dev_info(ctx->dev, "tft35_pipe_update - 0");
     struct drm_plane_state *pstate = pipe->plane.state;
     struct drm_framebuffer *fb = pstate->fb;
     struct drm_rect src_rect = pstate->src;
