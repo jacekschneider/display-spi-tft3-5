@@ -49,9 +49,16 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
                        struct drm_plane_state *old_plane_state)
 {
-    struct tft35 *ctx = container_of(pipe, struct tft35, pipe);
+    struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
     struct drm_plane_state *pstate = pipe->plane.state;
     struct drm_framebuffer *fb = pstate->fb;
+    struct drm_rect src = pstate->src;
+
+    int w = src.x2 - src.x1;   // still in 16.16
+    int h = src.y2 - src.y1;
+
+    w >>= 16;   // convert from 16.16
+    h >>= 16;
 
     struct drm_gem_object *obj;
     struct drm_gem_shmem_object *shmem;
@@ -72,16 +79,16 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     iosys_map_set_vaddr(&src, shmem->vaddr);
     iosys_map_set_vaddr(&dst, ctx->tx_buf);
 
-    dst_pitch = fb->width * 2;
+    dst_pitch = w * 2;
 
     rect.x1 = 0;
     rect.y1 = 0;
-    rect.x2 = fb->width;
-    rect.y2 = fb->height;
+    rect.x2 = w;
+    rect.y2 = h;
 
     drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
 
-    len = fb->width * fb->height * 2;
+    len = w * h * 2;
 
     ret = tft35_write_buffer(ctx, ctx->tx_buf, len);
     if (ret)
@@ -192,7 +199,7 @@ int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
     return ret;
 }
 
-static inline int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
+static int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
 {
     int ret;
     gpiod_set_value_cansleep(ctx->dc_gpio, 0);
