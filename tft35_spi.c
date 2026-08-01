@@ -410,7 +410,7 @@ static struct spi_driver tft35_spi_driver = {
     {
         .owner = THIS_MODULE,
         .name = "tft35display",
-        .of_match_table = tft35_of_match,
+        .of_match_table = of_match_ptr(tft35_of_match),
     },
     .id_table = tft35_id_table,
 };
