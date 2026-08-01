@@ -303,7 +303,7 @@ static const struct drm_connector_helper_funcs tft35_connector_helper_funcs = {
 
 static const struct drm_mode_config_funcs drm_simple_mode_config_funcs = {
     .atomic_check = drm_atomic_helper_check,
-    .atomic_commit = drm_atomic_helper_check,
+    .atomic_commit = drm_atomic_helper_commit,
 };
 
 static const struct of_device_id tft35_of_match[] = {
