@@ -41,7 +41,7 @@ static const struct drm_driver driver_drm = {
     .major = 1,
     .minor = 0,
     .patchlevel = 0,
-    .name = "tft35display",
+    .name = "TFT35",
     .desc = "TFT35 DRM DRIVER",
     .date = "20263005",
     .driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
@@ -408,7 +408,7 @@ static struct spi_driver tft35_spi_driver = {
     {
         .owner = THIS_MODULE,
         .name = "tft35display",
-        .of_match_table = of_match_ptr(tft35_of_match),
+        .of_match_table = tft35_of_match,
     },
     .id_table = tft35_id_table,
 };
