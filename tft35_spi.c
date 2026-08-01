@@ -329,6 +329,8 @@ static int tft35_probe(struct spi_device *spi)
     ctx = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
     if (IS_ERR(ctx))
     return PTR_ERR(ctx);
+
+    spi_set_drvdata(spi, ctx);
     drm = &ctx->dev_drm;
 
     ctx->dev = &spi->dev;
