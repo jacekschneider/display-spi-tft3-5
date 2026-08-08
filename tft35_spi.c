@@ -120,14 +120,26 @@ static void tft35_fill_color(struct tft35 *ctx, u16 color)
             tft35_write_data16(ctx, color);
 }
 
-static int tft35_write_buffer(struct tft35 *ctx, void *buf, size_t data_length)
+static int tft35_write_buffer(struct tft35 *ctx, const void *buf, size_t len)
 {
-    int ret;
-    gpiod_set_value_cansleep(ctx->dc_gpio, 0);
-    ret = spi_write(ctx->spi, buf, data_length);
-    if (ret < 0)
-        dev_err(ctx->dev, "ERROR: Failed tft35_write_buffer %d\n", ret);
-    return ret;
+    int ret = 0;
+    size_t sent = 0;
+    const uint8_t *p = buf;
+    const size_t chunk = 16 * 1024;
+
+    gpiod_set_value_cansleep(ctx->dc_gpio, 1);
+
+    while (sent < len) {
+        size_t this_len = min_t(size_t, chunk, len - sent);
+        ret = spi_write(ctx->spi, p + sent, this_len);
+        if (ret < 0) {
+            dev_err(ctx->dev, "tft35_write_data: spi_write failed at %zu/%zu: %d\n",
+                    sent, len, ret);
+            return ret;
+        }
+        sent += this_len;
+    }
+    return 0;
 }
 
 static int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
@@ -432,7 +444,8 @@ static int tft35_probe(struct spi_device *spi)
     ctx->pdev_drm->mode_config.min_width  = 0;
     ctx->pdev_drm->mode_config.min_height = 0;
     ctx->pdev_drm->mode_config.max_width  = 480; 
-    ctx->pdev_drm->mode_config.max_height = 320;  
+    ctx->pdev_drm->mode_config.max_height = 320;
+    drm->mode_config.allow_fb_modifiers = true;
 
     struct drm_connector *connector = &ctx->connector;
     drm_connector_init(ctx->pdev_drm, connector,
