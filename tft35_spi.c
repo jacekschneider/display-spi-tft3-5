@@ -22,6 +22,7 @@
 #include <drm/drm_fb_helper.h>
 #include <drm/drm_fourcc.h>
 #include <linux/iosys-map.h>
+#include <linux/crc32.h>
 
 
 #define __USE_MISC
