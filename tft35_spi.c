@@ -343,7 +343,6 @@ static int tft35_probe(struct spi_device *spi)
     ctx->pdev_drm->mode_config.min_height = 0;
     ctx->pdev_drm->mode_config.max_width  = 480; 
     ctx->pdev_drm->mode_config.max_height = 320;  
-    drm_mode_config_reset(ctx->pdev_drm);
 
     struct drm_connector *connector = &ctx->connector;
     drm_connector_init(ctx->pdev_drm, connector,
@@ -357,6 +356,7 @@ static int tft35_probe(struct spi_device *spi)
         dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err_code);
         return err_code;
     }
+    drm_mode_config_reset(ctx->pdev_drm);
 
     ctx->tx_buf_size = 480 * 320 * 2;
     ctx->tx_buf = devm_kmalloc(dev, ctx->tx_buf_size, GFP_KERNEL);
