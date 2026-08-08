@@ -18,6 +18,11 @@
 
 #include <uapi/drm/drm_fourcc.h>
 
+#include <drm/drm_framebuffer.h>
+#include <drm/drm_fb_helper.h>
+#include <drm/drm_fourcc.h>
+#include <linux/iosys-map.h>
+
 
 #define __USE_MISC
 DEFINE_DRM_GEM_FOPS(drm_fops);
@@ -215,14 +220,14 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     struct drm_framebuffer *fb;
     struct drm_rect src_rect;
     int w, h;
-    void *vaddr = NULL;
+    struct drm_gem_object *obj;
+    struct drm_gem_shmem_object *shmem;
     struct iosys_map src_map = IOSYS_MAP_INIT_VADDR(NULL);
     struct iosys_map dst_map = IOSYS_MAP_INIT_VADDR(NULL);
     unsigned int dst_pitch;
     struct drm_rect rect;
-    int ret;
     int bpp_bytes = 0;
-    struct drm_gem_object *obj;
+    int ret;
 
     if (!pstate) {
         dev_dbg(ctx->dev, "tft35_pipe_update: no plane state\n");
@@ -252,7 +257,6 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         bpp_bytes = 4;
         break;
     case DRM_FORMAT_RGB565:
-    case DRM_FORMAT_RG16:
         bpp_bytes = 2;
         break;
     default:
@@ -261,13 +265,15 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         return;
     }
 
-    dst_pitch = w * 2; 
+    dst_pitch = w * 2;
+
     rect.x1 = 0;
     rect.y1 = 0;
     rect.x2 = w;
     rect.y2 = h;
 
-    dev_dbg(ctx->dev, "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_pitch=%u\n",
+    dev_dbg(ctx->dev,
+            "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_pitch=%u\n",
             fb->base.id, fb->format->format, w, h, bpp_bytes, dst_pitch);
 
     obj = drm_gem_fb_get_obj(fb, 0);
@@ -276,34 +282,38 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         return;
     }
 
-    vaddr = drm_gem_shmem_vmap(obj);
-    if (IS_ERR_OR_NULL(vaddr)) {
-        dev_err(ctx->dev, "tft35_pipe_update: drm_gem_shmem_vmap failed: %p\n", vaddr);
+    shmem = to_drm_gem_shmem_obj(obj);
+    if (!shmem) {
+        dev_err(ctx->dev, "tft35_pipe_update: gem object is not shmem-backed\n");
         return;
     }
 
-    iosys_map_set_vaddr(&src_map, vaddr + fb->offsets[0]);
+    ret = drm_gem_shmem_vmap(shmem, &src_map);
+    if (ret) {
+        dev_err(ctx->dev, "tft35_pipe_update: drm_gem_shmem_vmap failed: %d\n", ret);
+        return;
+    }
+
     iosys_map_set_vaddr(&dst_map, ctx->tx_buf);
 
     if (!src_map.vaddr) {
         dev_err(ctx->dev, "tft35_pipe_update: invalid src vaddr\n");
-        drm_gem_shmem_vunmap(vaddr);
-        return;
+        goto out_unmap;
     }
     if (!dst_map.vaddr) {
         dev_err(ctx->dev, "tft35_pipe_update: invalid dst vaddr\n");
-        drm_gem_shmem_vunmap(vaddr);
-        return;
+        goto out_unmap;
     }
     if (dst_pitch < (unsigned int)(w * 2)) {
         dev_err(ctx->dev, "tft35_pipe_update: dst_pitch too small %u < %u\n",
                 dst_pitch, (unsigned int)(w * 2));
-        drm_gem_shmem_vunmap(vaddr);
-        return;
+        goto out_unmap;
     }
 
     drm_fb_memcpy(&dst_map, &dst_pitch, &src_map, fb, &rect);
-    drm_gem_shmem_vunmap(vaddr);
+
+out_unmap:
+    drm_gem_shmem_vunmap(shmem, &src_map);
 
     ret = tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
     if (ret)
