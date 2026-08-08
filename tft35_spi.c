@@ -46,7 +46,7 @@ static const struct drm_driver driver_drm = {
     .date = "20263005",
     .driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
     .fops = &drm_fops,
-    DRM_GEM_SHMEM_DRIVER_OPS
+    DRM_GEM_SHMEM_DRIVER_OPS,
     .prime_fd_to_handle = drm_gem_prime_fd_to_handle,
     .prime_handle_to_fd = drm_gem_prime_handle_to_fd,
     .gem_prime_import_sg_table = drm_gem_shmem_prime_import_sg_table,
