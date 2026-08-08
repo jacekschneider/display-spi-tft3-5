@@ -209,51 +209,107 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
 
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
                        struct drm_plane_state *old_plane_state)
-{   
+{
     struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
-    dev_info(ctx->dev, "tft35_pipe_update - 0");
     struct drm_plane_state *pstate = pipe->plane.state;
-    struct drm_framebuffer *fb = pstate->fb;
-    struct drm_rect src_rect = pstate->src;
-
-    int w = src_rect.x2 - src_rect.x1;   // still in 16.16
-    int h = src_rect.y2 - src_rect.y1;
-
-    w >>= 16;   // convert from 16.16
-    h >>= 16;
-    dev_info(ctx->dev, "tft35_pipe_update - 1");
-    struct drm_gem_object *obj;
-    struct drm_gem_shmem_object *shmem;
-    struct iosys_map src, dst;
-    struct drm_rect rect;
+    struct drm_framebuffer *fb;
+    struct drm_rect src_rect;
+    int w, h;
+    void *vaddr = NULL;
+    struct iosys_map src_map = IOSYS_MAP_INIT_VADDR(NULL);
+    struct iosys_map dst_map = IOSYS_MAP_INIT_VADDR(NULL);
     unsigned int dst_pitch;
-    size_t len;
+    struct drm_rect rect;
     int ret;
+    int bpp_bytes = 0;
+    struct drm_gem_object *obj;
 
-    if (!fb)
-    {
-        dev_info(ctx->dev, "ignored a display update\n");
+    if (!pstate) {
+        dev_dbg(ctx->dev, "tft35_pipe_update: no plane state\n");
         return;
     }
-    dev_info(ctx->dev, "tft35_pipe_update - 2");
-    obj = drm_gem_fb_get_obj(fb, 0);
-    shmem = to_drm_gem_shmem_obj(obj);
-    iosys_map_set_vaddr(&src, shmem->vaddr);
-    iosys_map_set_vaddr(&dst, ctx->tx_buf);
 
-    dst_pitch = w * 2;
+    fb = pstate->fb;
+    if (!fb) {
+        dev_dbg(ctx->dev, "tft35_pipe_update: no framebuffer attached\n");
+        return;
+    }
 
+    src_rect = pstate->src;
+    w = (src_rect.x2 - src_rect.x1) >> 16;
+    h = (src_rect.y2 - src_rect.y1) >> 16;
+
+    if (w <= 0 || h <= 0) {
+        dev_dbg(ctx->dev, "tft35_pipe_update: empty rect w=%d h=%d\n", w, h);
+        return;
+    }
+
+    switch (fb->format->format) {
+    case DRM_FORMAT_XRGB8888:
+    case DRM_FORMAT_ARGB8888:
+    case DRM_FORMAT_XBGR8888:
+    case DRM_FORMAT_ABGR8888:
+        bpp_bytes = 4;
+        break;
+    case DRM_FORMAT_RGB565:
+    case DRM_FORMAT_RG16:
+        bpp_bytes = 2;
+        break;
+    default:
+        dev_err(ctx->dev, "tft35_pipe_update: unsupported fb format 0x%08x\n",
+                fb->format->format);
+        return;
+    }
+
+    dst_pitch = w * 2; 
     rect.x1 = 0;
     rect.y1 = 0;
     rect.x2 = w;
     rect.y2 = h;
-    dev_info(ctx->dev, "tft35_pipe_update - 3");
-    drm_fb_memcpy(&dst, &dst_pitch, &src, fb, &rect);
+
+    dev_dbg(ctx->dev, "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_pitch=%u\n",
+            fb->base.id, fb->format->format, w, h, bpp_bytes, dst_pitch);
+
+    obj = drm_gem_fb_get_obj(fb, 0);
+    if (!obj) {
+        dev_err(ctx->dev, "tft35_pipe_update: failed to get gem object for fb\n");
+        return;
+    }
+
+    vaddr = drm_gem_shmem_vmap(obj);
+    if (IS_ERR_OR_NULL(vaddr)) {
+        dev_err(ctx->dev, "tft35_pipe_update: drm_gem_shmem_vmap failed: %p\n", vaddr);
+        return;
+    }
+
+    iosys_map_set_vaddr(&src_map, vaddr + fb->offsets[0]);
+    iosys_map_set_vaddr(&dst_map, ctx->tx_buf);
+
+    if (!src_map.vaddr) {
+        dev_err(ctx->dev, "tft35_pipe_update: invalid src vaddr\n");
+        drm_gem_shmem_vunmap(vaddr);
+        return;
+    }
+    if (!dst_map.vaddr) {
+        dev_err(ctx->dev, "tft35_pipe_update: invalid dst vaddr\n");
+        drm_gem_shmem_vunmap(vaddr);
+        return;
+    }
+    if (dst_pitch < (unsigned int)(w * 2)) {
+        dev_err(ctx->dev, "tft35_pipe_update: dst_pitch too small %u < %u\n",
+                dst_pitch, (unsigned int)(w * 2));
+        drm_gem_shmem_vunmap(vaddr);
+        return;
+    }
+
+    drm_fb_memcpy(&dst_map, &dst_pitch, &src_map, fb, &rect);
+    drm_gem_shmem_vunmap(vaddr);
 
     ret = tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
     if (ret)
-        dev_err(ctx->dev, "ERROR: Failed tft35_pipe_update %d\n", ret);
+        dev_err(ctx->dev, "tft35_pipe_update: tft35_spi_write_pixels failed: %d\n", ret);
 }
+
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
     .enable = tft35_pipe_enable,
