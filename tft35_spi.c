@@ -36,7 +36,6 @@ struct tft35 {
     size_t tx_buf_size;    
 };
 
-
 static const struct drm_driver driver_drm = {
     .major = 1,
     .minor = 0,
@@ -303,6 +302,7 @@ static const struct drm_connector_helper_funcs tft35_connector_helper_funcs = {
 };
 
 static const struct drm_mode_config_funcs drm_simple_mode_config_funcs = {
+    .fb_create = drm_gem_fb_create,
     .atomic_check = drm_atomic_helper_check,
     .atomic_commit = drm_atomic_helper_commit,
 };
