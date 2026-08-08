@@ -54,7 +54,9 @@ static const struct drm_driver driver_drm = {
 };
 
 static const uint32_t formats[] = {
-    DRM_FORMAT_RGB565,
+    DRM_FORMAT_XRGB8888,
+    DRM_FORMAT_ARGB8888,
+    DRM_FORMAT_RGB565 
 };
 
 int tft35_write_cmd(struct tft35 *ctx, uint8_t cmd)
