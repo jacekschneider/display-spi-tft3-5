@@ -448,22 +448,21 @@ static int tft35_probe(struct spi_device *spi)
     err = drm_connector_init(ctx->pdev_drm, &ctx->connector,
                              &tft35_connector_funcs,
                              DRM_MODE_CONNECTOR_SPI);
-    if (err) {
-        dev_err(dev, "tft35: drm_connector_init failed: %d\n", err);
+    if (err)
         return err;
-    }
+
     drm_connector_helper_add(&ctx->connector, &tft35_connector_helper_funcs);
 
     err = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp,
                                        &dsdp_funcs,
                                        formats, ARRAY_SIZE(formats),
+                                       NULL,
                                        &ctx->connector);
-    if (err < 0) {
-        dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err);
+    if (err < 0)
         return err;
-    }
 
-    drm_connector_attach_encoder(&ctx->connector, ctx->dsdp.encoder);
+    drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
+
     drm_mode_config_reset(ctx->pdev_drm);
     drm_kms_helper_poll_init(ctx->pdev_drm);
 
@@ -472,33 +471,27 @@ static int tft35_probe(struct spi_device *spi)
     if (!ctx->tx_buf)
         return -ENOMEM;
 
-    ctx->dc_gpio = devm_gpiod_get(dev, "dc", GPIOD_OUT_HIGH);
-    if (IS_ERR(ctx->dc_gpio)) {
-        dev_dbg(dev, "ERROR: dc_gpio devm_gpiod_get\n");
-        return -EIO;
-    }
+    ctx->dc_gpio = devm_gpiod_get(dev, "dc", GPIOD_OUT_LOW);
+    if (IS_ERR(ctx->dc_gpio))
+        return PTR_ERR(ctx->dc_gpio);
 
     ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
-    if (IS_ERR(ctx->reset_gpio)) {
-        dev_dbg(dev, "ERROR: reset_gpio devm_gpiod_get\n");
-        return -EIO;
-    }
+    if (IS_ERR(ctx->reset_gpio))
+        return PTR_ERR(ctx->reset_gpio);
 
     err = drm_dev_register(ctx->pdev_drm, 0);
-    if (err < 0) {
-        dev_dbg(dev, "ERROR: Failed drm_dev_register %d\n", err);
+    if (err < 0)
         return err;
-    }
 
     err = tft35_display_init(ctx);
-    if (err < 0) {
-        dev_dbg(dev, "ERROR: tft35 display init %d\n", err);
+    if (err < 0)
         return err;
-    }
 
     tft35_fill_color(ctx, 0x07E0);
+
     return 0;
 }
+
 
 
 static void tft35_remove(struct spi_device *spi)
