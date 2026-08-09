@@ -375,7 +375,7 @@ static const struct drm_display_mode tft35_default_mode = {
     .vsync_start = 320,
     .vsync_end = 320,
     .vtotal = 320,
-    .vrefresh = 60,
+    .vscan = 60,
     .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
