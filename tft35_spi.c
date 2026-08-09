@@ -477,13 +477,25 @@ static int tft35_probe(struct spi_device *spi)
     if (IS_ERR(ctx->reset_gpio))
         return PTR_ERR(ctx->reset_gpio);
 
+    drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
+    pr_info("tft35: after init attach connector->encoder=%p\n", ctx->connector.encoder);
+
     err = drm_dev_register(ctx->pdev_drm, 0);
     if (err < 0)
         return err;
-    
+
     pr_info("tft35: dsdp.encoder=%p connector=%p\n", &ctx->dsdp.encoder, &ctx->connector);
     drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
     pr_info("tft35: connector->encoder=%p\n", ctx->connector.encoder);
+
+    if (!ctx->connector.encoder) {
+        msleep(50);
+        drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
+        pr_info("tft35: connector->encoder after retry=%p\n", ctx->connector.encoder);
+    }
+
+    pr_info("tft35: encoder possible_crtcs=0x%x possible_clones=0x%x\n",
+            ctx->dsdp.encoder.possible_crtcs, ctx->dsdp.encoder.possible_clones);
 
     err = tft35_display_init(ctx);
     if (err < 0)
@@ -493,6 +505,7 @@ static int tft35_probe(struct spi_device *spi)
 
     return 0;
 }
+
 
 
 
