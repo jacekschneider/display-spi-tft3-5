@@ -163,55 +163,50 @@ static int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int h
     return ret;
 }
 
-// init sequence
-// CMD F1: 36 04 00 3C 0F 8F
-// CMD F2: 18 A3 12 02 B2 12 FF 10 00
-// CMD F8: 21 04
-// CMD F9: 00 08
-// CMD 36: 08
-// CMD B4: 00
-// CMD C1: 41
-// CMD C5: 00 91 80 00
-// CMD E0: 0F 1F 1C 0C 0F 08 48 98 37 0A 13 04 11 0D 00
-// CMD E1: 0F 32 2E 0B 0D 05 47 75 37 06 10 03 24 20 00
-// CMD 3A: 55
-// CMD 11
-// CMD 36: 28
-// DELAY 255 ms
-// CMD 29
 int tft35_display_init(struct tft35 *ctx)
 {
-    int ret=0;
-    uint8_t cmdf1[] = {0x36, 0x04, 0x00, 0x3C, 0x0F, 0x8F};
-    uint8_t cmdf2[] = {0x18, 0xA3, 0x12, 0x02, 0xB2, 0x12, 0xFF, 0x10, 0x00};
-    uint8_t cmdf8[] = {0x21, 0x04};
-    uint8_t cmdf9[] = {0x00, 0x08};
-    uint8_t cmd36[] = {0x48};    
-    uint8_t cmdb4[] = {0x00};
-    uint8_t cmdc1[] = {0x41};
-    uint8_t cmdc5[] = {0x00, 0x91, 0x80, 0x00};
-    uint8_t cmde0[] = {0x0F, 0x1F, 0x1C, 0x0C, 0x0F, 0x08, 0x48, 0x98, 0x37, 0x0A, 0x13, 0x04, 0x11, 0x0D, 0x00};
-    uint8_t cmde1[] = {0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75, 0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00};
-    uint8_t cmd3a[] = {0x55};
-    uint8_t cmd36_2[] = {0x28};
+    int ret = 0;
 
-    tft35_write_cmd_data(ctx, 0xF1, cmdf1, ARRAY_SIZE(cmdf1));
-    tft35_write_cmd_data(ctx, 0xF2, cmdf2, ARRAY_SIZE(cmdf2));
-    tft35_write_cmd_data(ctx, 0xF8, cmdf8, ARRAY_SIZE(cmdf8));
-    tft35_write_cmd_data(ctx, 0xF9, cmdf9, ARRAY_SIZE(cmdf9));
+    uint8_t cmdC0[] = {0x0F, 0x0F};
+    uint8_t cmdC1[] = {0x41};
+    uint8_t cmdC5[] = {0x00, 0x91, 0x80, 0x00};
+    uint8_t cmd36[] = {0x48};
+    uint8_t cmd3A[] = {0x55};
+    uint8_t cmdB1[] = {0xB0};
+    uint8_t cmdB4[] = {0x02};
+    uint8_t cmdB6[] = {0x02, 0x02};
+    uint8_t cmdE0[] = {
+        0x0F, 0x1F, 0x1C, 0x0C, 0x0F, 0x08, 0x48, 0x98,
+        0x37, 0x0A, 0x13, 0x04, 0x11, 0x0D, 0x00
+    };
+    uint8_t cmdE1[] = {
+        0x0F, 0x32, 0x2E, 0x0B, 0x0D, 0x05, 0x47, 0x75,
+        0x37, 0x06, 0x10, 0x03, 0x24, 0x20, 0x00
+    };
+
+    tft35_write_cmd_data(ctx, 0xC0, cmdC0, ARRAY_SIZE(cmdC0));
+    tft35_write_cmd_data(ctx, 0xC1, cmdC1, ARRAY_SIZE(cmdC1));
+    tft35_write_cmd_data(ctx, 0xC5, cmdC5, ARRAY_SIZE(cmdC5));
+
     tft35_write_cmd_data(ctx, 0x36, cmd36, ARRAY_SIZE(cmd36));
-    tft35_write_cmd_data(ctx, 0xb4, cmdb4, ARRAY_SIZE(cmdb4));
-    tft35_write_cmd_data(ctx, 0xc1, cmdc1, ARRAY_SIZE(cmdc1));
-    tft35_write_cmd_data(ctx, 0xc5, cmdc5, ARRAY_SIZE(cmdc5));
-    tft35_write_cmd_data(ctx, 0xe0, cmde0, ARRAY_SIZE(cmde0));
-    tft35_write_cmd_data(ctx, 0xe1, cmde1, ARRAY_SIZE(cmde1));
-    tft35_write_cmd_data(ctx, 0x3a, cmd3a, ARRAY_SIZE(cmd3a));
+    tft35_write_cmd_data(ctx, 0x3A, cmd3A, ARRAY_SIZE(cmd3A));
+
+    tft35_write_cmd_data(ctx, 0xB1, cmdB1, ARRAY_SIZE(cmdB1));
+    tft35_write_cmd_data(ctx, 0xB4, cmdB4, ARRAY_SIZE(cmdB4));
+    tft35_write_cmd_data(ctx, 0xB6, cmdB6, ARRAY_SIZE(cmdB6));
+
+    tft35_write_cmd_data(ctx, 0xE0, cmdE0, ARRAY_SIZE(cmdE0));
+    tft35_write_cmd_data(ctx, 0xE1, cmdE1, ARRAY_SIZE(cmdE1));
+
     tft35_write_cmd(ctx, 0x11);
-    tft35_write_cmd_data(ctx, 0x36, cmd36_2, ARRAY_SIZE(cmd36_2));
-    msleep(255);
-    ret=tft35_write_cmd(ctx, 0x29);
+    msleep(120);
+
+    ret = tft35_write_cmd(ctx, 0x29);
+    msleep(20);
+
     return ret;
 }
+
 
 void tft35_pipe_enable(struct drm_simple_display_pipe *pipe,
 		       struct drm_crtc_state *crtc_state,
@@ -380,7 +375,7 @@ static const struct drm_display_mode tft35_default_mode = {
     .vsync_start = 320,
     .vsync_end = 320,
     .vtotal = 320,
-    .vscan = 60,
+    .vscan = 1,
     .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
