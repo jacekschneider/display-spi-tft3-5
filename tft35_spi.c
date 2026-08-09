@@ -220,6 +220,21 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
     ;
 }
 
+static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned int width)
+{
+    unsigned int x;
+    for (x = 0; x < width; x++) {
+        u32 px;
+        memcpy(&px, src + x * 4, 4); /* safe read in CPU endianness */
+        u8 r = (px >> 16) & 0xff;
+        u8 g = (px >> 8) & 0xff;
+        u8 b = (px >> 0) & 0xff;
+        u16 rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        dst[2 * x + 0] = (rgb565 >> 8) & 0xff;
+        dst[2 * x + 1] = rgb565 & 0xff;
+    }
+}
+
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
                        struct drm_plane_state *old_plane_state)
 {
@@ -232,8 +247,7 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     struct drm_gem_shmem_object *shmem;
     struct iosys_map src_map = IOSYS_MAP_INIT_VADDR(NULL);
     struct iosys_map dst_map = IOSYS_MAP_INIT_VADDR(NULL);
-    unsigned int dst_pitch;
-    struct drm_rect rect;
+    unsigned int dst_stride;
     int bpp_bytes = 0;
     int ret;
     size_t required_len;
@@ -274,17 +288,9 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         return;
     }
 
-    dst_pitch = w * 2;
+    /* Panel native output is RGB565 (2 bytes per pixel) */
+    dst_stride = w * 2;
     required_len = (size_t)w * (size_t)h * 2;
-
-    rect.x1 = 0;
-    rect.y1 = 0;
-    rect.x2 = w;
-    rect.y2 = h;
-
-    dev_dbg(ctx->dev,
-            "tft35_pipe_update: start fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_pitch=%u\n",
-            fb->base.id, fb->format->format, w, h, bpp_bytes, dst_pitch);
 
     if (!ctx->tx_buf) {
         dev_err(ctx->dev, "tft35_pipe_update: no tx_buf allocated\n");
@@ -309,9 +315,8 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         return;
     }
 
-    if (fb->offsets[0]) {
+    if (fb->offsets[0])
         iosys_map_set_vaddr(&src_map, src_map.vaddr + fb->offsets[0]);
-    }
 
     iosys_map_set_vaddr(&dst_map, ctx->tx_buf);
 
@@ -323,22 +328,45 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         dev_err(ctx->dev, "tft35_pipe_update: invalid dst vaddr\n");
         goto out_unmap;
     }
-    if (dst_pitch < (unsigned int)(w * 2)) {
-        dev_err(ctx->dev, "tft35_pipe_update: dst_pitch too small %u < %u\n",
-                dst_pitch, (unsigned int)(w * 2));
+    if (dst_stride < (unsigned int)(w * 2)) {
+        dev_err(ctx->dev, "tft35_pipe_update: dst_stride too small %u < %u\n",
+                dst_stride, (unsigned int)(w * 2));
         goto out_unmap;
     }
 
     dev_dbg(ctx->dev,
-            "pipe_update: pitches[0]=%u offsets[0]=%u src_map=%p dst_map=%p required_len=%zu\n",
-            fb->pitches[0], fb->offsets[0], src_map.vaddr, dst_map.vaddr, required_len);
+            "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d src_pitch=%u dst_stride=%u\n",
+            fb->base.id, fb->format->format, w, h, bpp_bytes, fb->pitches[0], dst_stride);
 
-    drm_fb_memcpy(&dst_map, &dst_pitch, &src_map, fb, &rect);
+    /* Per-line copy/convert using fb->pitches[0] as source stride */
+    {
+        const u8 *src_base = src_map.vaddr;
+        u8 *dst_base = dst_map.vaddr;
+        unsigned int src_stride = fb->pitches[0];
+        unsigned int y;
+
+        for (y = 0; y < (unsigned int)h; y++) {
+            const u8 *src_line = src_base + y * src_stride;
+            u8 *dst_line = dst_base + y * dst_stride;
+
+            if (bpp_bytes == 4) {
+                /* Convert 32bpp XRGB/ARGB -> RGB565 (big-endian bytes) */
+                convert_line_xrgb8888_to_rgb565_be(dst_line, src_line, w);
+            } else {
+                /* Source already RGB565: copy and ensure panel endianness (BE here) */
+                unsigned int i;
+                const u16 *s = (const u16 *)src_line;
+                u16 *d = (u16 *)dst_line;
+                for (i = 0; i < (unsigned int)w; i++)
+                    d[i] = cpu_to_be16(s[i]); /* change to cpu_to_le16() if panel expects LE */
+            }
+        }
+    }
 
     {
         size_t crc_len = min_t(size_t, 64, required_len);
         u32 crc = crc32_le(0, ctx->tx_buf, crc_len);
-        dev_dbg(ctx->dev, "pipe_update: tx_buf crc32=%08x (len=%zu)\n", crc, crc_len);
+        dev_dbg(ctx->dev, "tft35_pipe_update: tx_buf crc32=%08x (len=%zu)\n", crc, crc_len);
     }
 
 out_unmap:
@@ -350,6 +378,7 @@ out_unmap:
     else
         dev_dbg(ctx->dev, "tft35_pipe_update: tft35_spi_write_pixels OK\n");
 }
+
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
     .enable = tft35_pipe_enable,
