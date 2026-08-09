@@ -375,7 +375,7 @@ static const struct drm_display_mode tft35_default_mode = {
     .vsync_start = 320,
     .vsync_end = 320,
     .vtotal = 320,
-    .vscan = 1,
+    .vscan = 60,
     .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
@@ -436,8 +436,8 @@ static int tft35_probe(struct spi_device *spi)
 
     drm_mode_config_init(ctx->pdev_drm);
     ctx->pdev_drm->mode_config.funcs = &drm_simple_mode_config_funcs;
-    ctx->pdev_drm->mode_config.min_width  = 0;
-    ctx->pdev_drm->mode_config.min_height = 0;
+    ctx->pdev_drm->mode_config.min_width  = 1;
+    ctx->pdev_drm->mode_config.min_height = 1;
     ctx->pdev_drm->mode_config.max_width  = 320; 
     ctx->pdev_drm->mode_config.max_height = 480;
 
