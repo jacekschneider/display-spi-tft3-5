@@ -394,7 +394,7 @@ static int tft35_get_modes(struct drm_connector *connector)
     mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
     drm_mode_probed_add(connector, mode);
     pr_info("tft35: get_modes added mode %s\n", mode->name ? mode->name : "<noname>");
-    
+
     return 1;
 }
 
@@ -423,43 +423,47 @@ MODULE_DEVICE_TABLE(spi, tft35_id_table);
 
 static int tft35_probe(struct spi_device *spi)
 {
-    /* Create the main structure */
     struct drm_device *drm;
     struct tft35 *ctx;
-    struct device *dev = &spi->dev; // Use ctx->dev directly.
-    int err_code;
-    
+    struct device *dev = &spi->dev;
+    int err;
+
     ctx = devm_drm_dev_alloc(dev, &driver_drm, struct tft35, dev_drm);
     if (IS_ERR(ctx))
-    return PTR_ERR(ctx);
+        return PTR_ERR(ctx);
 
     spi_set_drvdata(spi, ctx);
     drm = &ctx->dev_drm;
-
-    ctx->dev = &spi->dev;
+    ctx->dev = dev;
     ctx->spi = spi;
     ctx->pdev_drm = drm;
 
+    drm_mode_config_init(ctx->pdev_drm);
     ctx->pdev_drm->mode_config.funcs = &drm_simple_mode_config_funcs;
     ctx->pdev_drm->mode_config.min_width  = 1;
     ctx->pdev_drm->mode_config.min_height = 1;
-    ctx->pdev_drm->mode_config.max_width  = 320; 
+    ctx->pdev_drm->mode_config.max_width  = 320;
     ctx->pdev_drm->mode_config.max_height = 480;
-    drm_mode_config_init(ctx->pdev_drm);
 
-
-    struct drm_connector *connector = &ctx->connector;
-    drm_connector_init(ctx->pdev_drm, connector,
-                    &tft35_connector_funcs,
-                    DRM_MODE_CONNECTOR_SPI);
-    drm_connector_helper_add(connector, &tft35_connector_helper_funcs);
-
-    err_code = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp, &dsdp_funcs, formats, ARRAY_SIZE(formats), NULL, connector);
-    if (err_code < 0)
-    {
-        dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err_code);
-        return err_code;
+    err = drm_connector_init(ctx->pdev_drm, &ctx->connector,
+                             &tft35_connector_funcs,
+                             DRM_MODE_CONNECTOR_SPI);
+    if (err) {
+        dev_err(dev, "tft35: drm_connector_init failed: %d\n", err);
+        return err;
     }
+    drm_connector_helper_add(&ctx->connector, &tft35_connector_helper_funcs);
+
+    err = drm_simple_display_pipe_init(ctx->pdev_drm, &ctx->dsdp,
+                                       &dsdp_funcs,
+                                       formats, ARRAY_SIZE(formats),
+                                       &ctx->connector);
+    if (err < 0) {
+        dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err);
+        return err;
+    }
+
+    drm_connector_attach_encoder(&ctx->connector, ctx->dsdp.encoder);
     drm_mode_config_reset(ctx->pdev_drm);
     drm_kms_helper_poll_init(ctx->pdev_drm);
 
@@ -469,39 +473,33 @@ static int tft35_probe(struct spi_device *spi)
         return -ENOMEM;
 
     ctx->dc_gpio = devm_gpiod_get(dev, "dc", GPIOD_OUT_HIGH);
-    if(IS_ERR(ctx->dc_gpio))
-    {
-        dev_dbg(dev, "ERROR: dc_gpio devm_gpio_get\n");
+    if (IS_ERR(ctx->dc_gpio)) {
+        dev_dbg(dev, "ERROR: dc_gpio devm_gpiod_get\n");
         return -EIO;
     }
 
     ctx->reset_gpio = devm_gpiod_get(dev, "reset", GPIOD_OUT_HIGH);
-    if(IS_ERR(ctx->reset_gpio))
-    {
-        dev_dbg(dev, "ERROR: reset_gpio devm_gpio_get\n");
+    if (IS_ERR(ctx->reset_gpio)) {
+        dev_dbg(dev, "ERROR: reset_gpio devm_gpiod_get\n");
         return -EIO;
     }
 
-    /* flags are passed to driver's load function,
-    but the callback is deprecated and the value should be 0*/
-    err_code = drm_dev_register(ctx->pdev_drm, 0);
-    if (err_code < 0)
-    {
-        dev_dbg(dev, "ERROR: Failed drm_dev_register %d\n", err_code);
-        return err_code;
+    err = drm_dev_register(ctx->pdev_drm, 0);
+    if (err < 0) {
+        dev_dbg(dev, "ERROR: Failed drm_dev_register %d\n", err);
+        return err;
     }
-    
-    spi_set_drvdata(spi, ctx);
 
-    err_code=tft35_display_init(ctx);
-    if (err_code < 0)
-    {
-        dev_dbg(dev, "ERROR: tft35 display init %d\n", err_code);
-        return err_code;
+    err = tft35_display_init(ctx);
+    if (err < 0) {
+        dev_dbg(dev, "ERROR: tft35 display init %d\n", err);
+        return err;
     }
+
     tft35_fill_color(ctx, 0x07E0);
     return 0;
 }
+
 
 static void tft35_remove(struct spi_device *spi)
 {
