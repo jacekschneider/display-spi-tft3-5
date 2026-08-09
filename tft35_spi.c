@@ -375,7 +375,7 @@ static const struct drm_display_mode tft35_default_mode = {
     .vsync_start = 320,
     .vsync_end = 320,
     .vtotal = 320,
-    .vscan = 60,
+    .vrefresh = 60,
     .flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
@@ -397,7 +397,6 @@ static int tft35_get_modes(struct drm_connector *connector)
 
     return 1;
 }
-
 
 static const struct drm_connector_helper_funcs tft35_connector_helper_funcs = {
     .get_modes = tft35_get_modes,   
@@ -442,8 +441,8 @@ static int tft35_probe(struct spi_device *spi)
     ctx->pdev_drm->mode_config.funcs = &drm_simple_mode_config_funcs;
     ctx->pdev_drm->mode_config.min_width  = 1;
     ctx->pdev_drm->mode_config.min_height = 1;
-    ctx->pdev_drm->mode_config.max_width  = 320;
-    ctx->pdev_drm->mode_config.max_height = 480;
+    ctx->pdev_drm->mode_config.max_width  = 480;
+    ctx->pdev_drm->mode_config.max_height = 320;
 
     err = drm_connector_init(ctx->pdev_drm, &ctx->connector,
                              &tft35_connector_funcs,
@@ -477,25 +476,14 @@ static int tft35_probe(struct spi_device *spi)
     if (IS_ERR(ctx->reset_gpio))
         return PTR_ERR(ctx->reset_gpio);
 
-    drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
-    pr_info("tft35: after init attach connector->encoder=%p\n", ctx->connector.encoder);
-
     err = drm_dev_register(ctx->pdev_drm, 0);
     if (err < 0)
         return err;
 
-    pr_info("tft35: dsdp.encoder=%p connector=%p\n", &ctx->dsdp.encoder, &ctx->connector);
     drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
-    pr_info("tft35: connector->encoder=%p\n", ctx->connector.encoder);
 
-    if (!ctx->connector.encoder) {
-        msleep(50);
-        drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
-        pr_info("tft35: connector->encoder after retry=%p\n", ctx->connector.encoder);
-    }
-
-    pr_info("tft35: encoder possible_crtcs=0x%x possible_clones=0x%x\n",
-            ctx->dsdp.encoder.possible_crtcs, ctx->dsdp.encoder.possible_clones);
+    pr_info("tft35: dsdp.encoder=%p connector=%p connector->encoder=%p\n",
+            &ctx->dsdp.encoder, &ctx->connector, ctx->connector.encoder);
 
     err = tft35_display_init(ctx);
     if (err < 0)
@@ -505,9 +493,6 @@ static int tft35_probe(struct spi_device *spi)
 
     return 0;
 }
-
-
-
 
 static void tft35_remove(struct spi_device *spi)
 {
