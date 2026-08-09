@@ -225,7 +225,7 @@ static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned 
     unsigned int x;
     for (x = 0; x < width; x++) {
         u32 px;
-        memcpy(&px, src + x * 4, 4); /* safe read in CPU endianness */
+        memcpy(&px, src + x * 4, 4);
         u8 r = (px >> 16) & 0xff;
         u8 g = (px >> 8) & 0xff;
         u8 b = (px >> 0) & 0xff;
@@ -233,6 +233,15 @@ static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned 
         dst[2 * x + 0] = (rgb565 >> 8) & 0xff;
         dst[2 * x + 1] = rgb565 & 0xff;
     }
+}
+
+static void copy_line_rgb565_to_be(u8 *dst, const u8 *src, unsigned int width)
+{
+    unsigned int i;
+    const u16 *s = (const u16 *)src;
+    u16 *d = (u16 *)dst;
+    for (i = 0; i < width; i++)
+        d[i] = cpu_to_be16(s[i]); 
 }
 
 void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
@@ -288,14 +297,18 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         return;
     }
 
-    /* Panel native output is RGB565 (2 bytes per pixel) */
     dst_stride = w * 2;
     required_len = (size_t)w * (size_t)h * 2;
+
+    dev_dbg(ctx->dev, "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_stride=%u required_len=%zu\n",
+            fb->base.id, fb->format->format, w, h, bpp_bytes, dst_stride, required_len);
 
     if (!ctx->tx_buf) {
         dev_err(ctx->dev, "tft35_pipe_update: no tx_buf allocated\n");
         return;
     }
+
+    memset(ctx->tx_buf, 0x00, required_len);
 
     obj = drm_gem_fb_get_obj(fb, 0);
     if (!obj) {
@@ -328,37 +341,28 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         dev_err(ctx->dev, "tft35_pipe_update: invalid dst vaddr\n");
         goto out_unmap;
     }
-    if (dst_stride < (unsigned int)(w * 2)) {
-        dev_err(ctx->dev, "tft35_pipe_update: dst_stride too small %u < %u\n",
-                dst_stride, (unsigned int)(w * 2));
-        goto out_unmap;
-    }
 
-    dev_dbg(ctx->dev,
-            "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d src_pitch=%u dst_stride=%u\n",
-            fb->base.id, fb->format->format, w, h, bpp_bytes, fb->pitches[0], dst_stride);
+    dev_dbg(ctx->dev, "tft35_pipe_update: pitches[0]=%u offsets[0]=%u src_map=%p dst_map=%p\n",
+            fb->pitches[0], fb->offsets[0], src_map.vaddr, dst_map.vaddr);
 
-    /* Per-line copy/convert using fb->pitches[0] as source stride */
     {
         const u8 *src_base = src_map.vaddr;
         u8 *dst_base = dst_map.vaddr;
         unsigned int src_stride = fb->pitches[0];
         unsigned int y;
 
+        dev_dbg(ctx->dev, "tft35_pipe_update: src_stride=%u dst_stride=%u\n", src_stride, dst_stride);
+
+        dev_dbg(ctx->dev, "tft35_pipe_update: first32bytes: %*ph\n", 32, src_base);
+
         for (y = 0; y < (unsigned int)h; y++) {
             const u8 *src_line = src_base + y * src_stride;
             u8 *dst_line = dst_base + y * dst_stride;
 
             if (bpp_bytes == 4) {
-                /* Convert 32bpp XRGB/ARGB -> RGB565 (big-endian bytes) */
                 convert_line_xrgb8888_to_rgb565_be(dst_line, src_line, w);
             } else {
-                /* Source already RGB565: copy and ensure panel endianness (BE here) */
-                unsigned int i;
-                const u16 *s = (const u16 *)src_line;
-                u16 *d = (u16 *)dst_line;
-                for (i = 0; i < (unsigned int)w; i++)
-                    d[i] = cpu_to_be16(s[i]); /* change to cpu_to_le16() if panel expects LE */
+                copy_line_rgb565_to_be(dst_line, src_line, w);
             }
         }
     }
@@ -378,6 +382,7 @@ out_unmap:
     else
         dev_dbg(ctx->dev, "tft35_pipe_update: tft35_spi_write_pixels OK\n");
 }
+
 
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
