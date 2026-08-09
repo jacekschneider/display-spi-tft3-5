@@ -456,18 +456,6 @@ static int tft35_probe(struct spi_device *spi)
     drm_mode_config_reset(ctx->pdev_drm);
     drm_kms_helper_poll_init(ctx->pdev_drm);
 
-     {
-        struct drm_display_mode *mode;
-
-        mode = drm_mode_duplicate(drm, &tft35_default_mode);
-        if (!mode)
-            return -ENOMEM;
-
-        mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
-
-        drm_mode_probed_add(&ctx->connector, mode);
-    }
-
     ctx->tx_buf_size = 480 * 320 * 2;
     ctx->tx_buf = devm_kmalloc(dev, ctx->tx_buf_size, GFP_KERNEL);
     if (!ctx->tx_buf)
