@@ -461,8 +461,6 @@ static int tft35_probe(struct spi_device *spi)
     if (err < 0)
         return err;
 
-    drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
-
     drm_mode_config_reset(ctx->pdev_drm);
     drm_kms_helper_poll_init(ctx->pdev_drm);
 
@@ -482,6 +480,10 @@ static int tft35_probe(struct spi_device *spi)
     err = drm_dev_register(ctx->pdev_drm, 0);
     if (err < 0)
         return err;
+    
+    pr_info("tft35: dsdp.encoder=%p connector=%p\n", &ctx->dsdp.encoder, &ctx->connector);
+    drm_connector_attach_encoder(&ctx->connector, &ctx->dsdp.encoder);
+    pr_info("tft35: connector->encoder=%p\n", ctx->connector.encoder);
 
     err = tft35_display_init(ctx);
     if (err < 0)
