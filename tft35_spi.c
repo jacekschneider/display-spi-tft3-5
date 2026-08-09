@@ -454,6 +454,8 @@ static int tft35_probe(struct spi_device *spi)
         return err_code;
     }
     drm_mode_config_reset(ctx->pdev_drm);
+    drm_kms_helper_poll_init(ctx->pdev_drm);
+
      {
         struct drm_display_mode *mode;
 
