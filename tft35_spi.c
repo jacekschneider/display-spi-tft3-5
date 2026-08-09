@@ -453,7 +453,6 @@ static int tft35_probe(struct spi_device *spi)
         dev_dbg(dev, "ERROR: Failed drm_simple_display_pipe_init %d\n", err_code);
         return err_code;
     }
-    drm_mode_config_reset(ctx->pdev_drm);
     drm_kms_helper_poll_init(ctx->pdev_drm);
 
     ctx->tx_buf_size = 480 * 320 * 2;
