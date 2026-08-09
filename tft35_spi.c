@@ -382,19 +382,25 @@ static const struct drm_display_mode tft35_default_mode = {
 static int tft35_get_modes(struct drm_connector *connector)
 {
     struct drm_display_mode *mode;
-
-    mode = drm_mode_duplicate(connector->dev, &tft35_default_mode);
+    struct drm_device *drm = connector->dev;
+    if (!drm) {
+        pr_err("tft35: get_modes: connector->dev is NULL\n");
+        return -EINVAL;
+    }
+    mode = drm_mode_duplicate(drm, &tft35_default_mode);
     if (!mode)
         return -ENOMEM;
-
     drm_mode_set_name(mode);
+    mode->type = DRM_MODE_TYPE_DRIVER | DRM_MODE_TYPE_PREFERRED;
     drm_mode_probed_add(connector, mode);
-
-    return 1;   // number of modes added
+    pr_info("tft35: get_modes added mode %s\n", mode->name ? mode->name : "<noname>");
+    
+    return 1;
 }
 
+
 static const struct drm_connector_helper_funcs tft35_connector_helper_funcs = {
-    .get_modes = tft35_get_modes,   // you must implement this
+    .get_modes = tft35_get_modes,   
 };
 
 static const struct drm_mode_config_funcs drm_simple_mode_config_funcs = {
