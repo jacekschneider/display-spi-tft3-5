@@ -262,6 +262,9 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe, struct drm_plane_st
     int ret;
     size_t required_len;
 
+    pr_debug("tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_stride=%u required_len=%zu\n",
+         fb->base.id, fb->format->format, w, h, bpp_bytes, dst_stride, required_len);
+
     if (!pstate)
         return;
 
