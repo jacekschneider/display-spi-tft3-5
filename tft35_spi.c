@@ -48,7 +48,6 @@ static const struct drm_driver driver_drm = {
     .patchlevel = 0,
     .name = "TFT35",
     .desc = "TFT35 DRM DRIVER",
-    .date = "20263005",
     .driver_features = DRIVER_GEM | DRIVER_MODESET | DRIVER_ATOMIC,
     .fops = &drm_fops,
     DRM_GEM_SHMEM_DRIVER_OPS,
@@ -220,7 +219,7 @@ void tft35_pipe_disable(struct drm_simple_display_pipe *pipe)
     ;
 }
 
-static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned int width)
+static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned int width, bool swap_rb)
 {
     unsigned int x;
     for (x = 0; x < width; x++) {
@@ -229,6 +228,9 @@ static void convert_line_xrgb8888_to_rgb565_be(u8 *dst, const u8 *src, unsigned 
         u8 r = (px >> 16) & 0xff;
         u8 g = (px >> 8) & 0xff;
         u8 b = (px >> 0) & 0xff;
+        if (swap_rb) {
+            u8 t = r; r = b; b = t;
+        }
         u16 rgb565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
         dst[2 * x + 0] = (rgb565 >> 8) & 0xff;
         dst[2 * x + 1] = rgb565 & 0xff;
@@ -241,11 +243,10 @@ static void copy_line_rgb565_to_be(u8 *dst, const u8 *src, unsigned int width)
     const u16 *s = (const u16 *)src;
     u16 *d = (u16 *)dst;
     for (i = 0; i < width; i++)
-        d[i] = cpu_to_be16(s[i]); 
+        d[i] = cpu_to_be16(s[i]);
 }
 
-void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
-                       struct drm_plane_state *old_plane_state)
+void tft35_pipe_update(struct drm_simple_display_pipe *pipe, struct drm_plane_state *old_plane_state)
 {
     struct tft35 *ctx = container_of(pipe, struct tft35, dsdp);
     struct drm_plane_state *pstate = pipe->plane.state;
@@ -261,25 +262,19 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     int ret;
     size_t required_len;
 
-    if (!pstate) {
-        dev_dbg(ctx->dev, "tft35_pipe_update: no plane state\n");
+    if (!pstate)
         return;
-    }
 
     fb = pstate->fb;
-    if (!fb) {
-        dev_dbg(ctx->dev, "tft35_pipe_update: no framebuffer attached\n");
+    if (!fb)
         return;
-    }
 
     src_rect = pstate->src;
     w = (src_rect.x2 - src_rect.x1) >> 16;
     h = (src_rect.y2 - src_rect.y1) >> 16;
 
-    if (w <= 0 || h <= 0) {
-        dev_dbg(ctx->dev, "tft35_pipe_update: empty rect w=%d h=%d\n", w, h);
+    if (w <= 0 || h <= 0)
         return;
-    }
 
     switch (fb->format->format) {
     case DRM_FORMAT_XRGB8888:
@@ -292,98 +287,65 @@ void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         bpp_bytes = 2;
         break;
     default:
-        dev_err(ctx->dev, "tft35_pipe_update: unsupported fb format 0x%08x\n",
-                fb->format->format);
         return;
     }
 
     dst_stride = w * 2;
     required_len = (size_t)w * (size_t)h * 2;
 
-    dev_dbg(ctx->dev, "tft35_pipe_update: fb=%u fmt=0x%08x w=%d h=%d bpp=%d dst_stride=%u required_len=%zu\n",
-            fb->base.id, fb->format->format, w, h, bpp_bytes, dst_stride, required_len);
-
-    if (!ctx->tx_buf) {
-        dev_err(ctx->dev, "tft35_pipe_update: no tx_buf allocated\n");
+    if (!ctx->tx_buf)
         return;
-    }
-
-    memset(ctx->tx_buf, 0x00, required_len);
 
     obj = drm_gem_fb_get_obj(fb, 0);
-    if (!obj) {
-        dev_err(ctx->dev, "tft35_pipe_update: failed to get gem object for fb\n");
+    if (!obj)
         return;
-    }
 
     shmem = to_drm_gem_shmem_obj(obj);
-    if (!shmem) {
-        dev_err(ctx->dev, "tft35_pipe_update: gem object is not shmem-backed\n");
+    if (!shmem)
         return;
-    }
 
-    ret = drm_gem_shmem_vmap(shmem, &src_map);
-    if (ret) {
-        dev_err(ctx->dev, "tft35_pipe_update: drm_gem_shmem_vmap failed: %d\n", ret);
+    ret = drm_gem_shmem_vmap_locked(shmem, &src_map);
+    if (ret)
         return;
-    }
-
-    if (fb->offsets[0])
-        iosys_map_set_vaddr(&src_map, src_map.vaddr + fb->offsets[0]);
 
     iosys_map_set_vaddr(&dst_map, ctx->tx_buf);
-
-    if (!src_map.vaddr) {
-        dev_err(ctx->dev, "tft35_pipe_update: invalid src vaddr\n");
+    if (!src_map.vaddr || !dst_map.vaddr)
         goto out_unmap;
-    }
-    if (!dst_map.vaddr) {
-        dev_err(ctx->dev, "tft35_pipe_update: invalid dst vaddr\n");
-        goto out_unmap;
-    }
-
-    dev_dbg(ctx->dev, "tft35_pipe_update: pitches[0]=%u offsets[0]=%u src_map=%p dst_map=%p\n",
-            fb->pitches[0], fb->offsets[0], src_map.vaddr, dst_map.vaddr);
 
     {
-        const u8 *src_base = src_map.vaddr;
-        u8 *dst_base = dst_map.vaddr;
         unsigned int src_stride = fb->pitches[0];
+        unsigned int src_x = src_rect.x1 >> 16;
+        unsigned int src_y = src_rect.y1 >> 16;
+        const u8 *gem_base = src_map.vaddr;
+        const u8 *src_base = gem_base +
+                             fb->offsets[0] +
+                             src_y * src_stride +
+                             src_x * bpp_bytes;
+        u8 *dst_base = dst_map.vaddr;
         unsigned int y;
+        bool swap_rb = false;
 
-        dev_dbg(ctx->dev, "tft35_pipe_update: src_stride=%u dst_stride=%u\n", src_stride, dst_stride);
+        if (fb->format->format == DRM_FORMAT_XBGR8888 ||
+            fb->format->format == DRM_FORMAT_ABGR8888)
+            swap_rb = true;
 
-        dev_dbg(ctx->dev, "tft35_pipe_update: first32bytes: %*ph\n", 32, src_base);
+        memset(ctx->tx_buf, 0x00, required_len);
 
         for (y = 0; y < (unsigned int)h; y++) {
-            const u8 *src_line = src_base + y * src_stride;
-            u8 *dst_line = dst_base + y * dst_stride;
+            const u8 *src_line = src_base + (size_t)y * src_stride;
+            u8 *dst_line = dst_base + (size_t)y * dst_stride;
 
-            if (bpp_bytes == 4) {
-                convert_line_xrgb8888_to_rgb565_be(dst_line, src_line, w);
-            } else {
+            if (bpp_bytes == 4)
+                convert_line_xrgb8888_to_rgb565_be(dst_line, src_line, w, swap_rb);
+            else
                 copy_line_rgb565_to_be(dst_line, src_line, w);
-            }
         }
     }
 
-    {
-        size_t crc_len = min_t(size_t, 64, required_len);
-        u32 crc = crc32_le(0, ctx->tx_buf, crc_len);
-        dev_dbg(ctx->dev, "tft35_pipe_update: tx_buf crc32=%08x (len=%zu)\n", crc, crc_len);
-    }
-
 out_unmap:
-    drm_gem_shmem_vunmap(shmem, &src_map);
-
-    ret = tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
-    if (ret)
-        dev_err(ctx->dev, "tft35_pipe_update: tft35_spi_write_pixels failed: %d\n", ret);
-    else
-        dev_dbg(ctx->dev, "tft35_pipe_update: tft35_spi_write_pixels OK\n");
+    drm_gem_shmem_vunmap_locked(shmem, &src_map);
+    tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
 }
-
-
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
     .enable = tft35_pipe_enable,
