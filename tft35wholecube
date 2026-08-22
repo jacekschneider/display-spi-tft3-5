@@ -63,52 +63,86 @@ static const uint32_t formats[] = {
     DRM_FORMAT_RGB565 
 };
 
-int tft35_write_cmd(struct tft35 *ctx, uint8_t cmd)
+static int tft35_write_cmd(struct tft35 *ctx, u8 cmd)
 {
     int ret;
+
     gpiod_set_value_cansleep(ctx->dc_gpio, 0);
-    ret = spi_write(ctx->spi, &cmd, 1);
-    if (ret < 0)
-        dev_err(ctx->dev, "ERROR: Failed tft35_write_cmd %d\n", ret);
+
+    ret = spi_write(ctx->spi, &cmd, sizeof(cmd));
+    if (ret)
+        dev_err(ctx->dev,
+                "tft35_write_cmd failed: %d\n",
+                ret);
+
     return ret;
 }
 
-int tft35_write_data(struct tft35 *ctx, uint8_t *data, size_t data_lenght)
-{
-    gpiod_set_value_cansleep(ctx->dc_gpio, 1);
-    return spi_write(ctx->spi, data, data_lenght);
-}
-
-int tft35_write_cmd_data(struct tft35 *ctx, uint8_t cmd, uint8_t *data, size_t data_length)
+static int tft35_write_data(struct tft35 *ctx,
+                            const u8 *data,
+                            size_t data_length)
 {
     int ret;
-    ret = tft35_write_cmd(ctx, cmd);
-    if (ret < 0)
-        return ret;
-    ret = tft35_write_data(ctx, data, data_length);
-    if (ret < 0)
-        dev_err(ctx->dev, "ERROR: Failed tft35_write_cmd_data %d\n", ret);
+
+    gpiod_set_value_cansleep(ctx->dc_gpio, 1);
+
+    ret = spi_write(ctx->spi, data, data_length);
+    if (ret)
+        dev_err(ctx->dev,
+                "tft35_write_data failed: %d\n",
+                ret);
+
     return ret;
 }
 
-static inline void tft35_write_data16(struct tft35 *ctx, u16 value)
+static int tft35_write_cmd_data(struct tft35 *ctx,
+                                u8 cmd,
+                                const u8 *data,
+                                size_t data_length)
 {
-    uint8_t buf[2] = { value >> 8, value & 0xFF };
-    tft35_write_data(ctx, buf, 2);
+    int ret;
+
+    ret = tft35_write_cmd(ctx, cmd);
+    if (ret)
+        return ret;
+
+    return tft35_write_data(ctx, data, data_length);
+}
+
+static int tft35_write_data16(struct tft35 *ctx, u16 value)
+{
+    u8 buf[2];
+
+    /*
+     * TFT protocol expects big-endian bytes.
+     *
+     * Example:
+     * 479 = 0x01DF
+     *
+     * transmitted as:
+     * 01 DF
+     */
+    buf[0] = value >> 8;
+    buf[1] = value & 0xff;
+
+    return tft35_write_data(ctx, buf, sizeof(buf));
 }
 
 static void tft35_fill_color(struct tft35 *ctx, u16 color)
 {
     int x, y;
 
+    // Set column address
     tft35_write_cmd(ctx, 0x2A);
     tft35_write_data16(ctx, 0);
     tft35_write_data16(ctx, 319);
 
+    // Set row address 
     tft35_write_cmd(ctx, 0x2B);
     tft35_write_data16(ctx, 0);
     tft35_write_data16(ctx, 479);
 
+    // Memory write
     tft35_write_cmd(ctx, 0x2C);
 
     for (y = 0; y < 480; y++)
@@ -116,22 +150,17 @@ static void tft35_fill_color(struct tft35 *ctx, u16 color)
             tft35_write_data16(ctx, color);
 }
 
-
 static void tft35_test_pattern(struct tft35 *ctx)
 {
-    static const u16 bars[] = {
-        0xF800, /* red */
-        0xFFE0, /* yellow */
-        0x07E0, /* green */
-        0x07FF, /* cyan */
-        0x001F, /* blue */
-        0xF81F, /* magenta */
-        0xFFFF, /* white */
-        0x0000, /* black */
-    };
-
     int x, y;
     u16 color;
+
+    /*
+     * Native ILI9486 GRAM geometry:
+     *
+     * 320 columns
+     * 480 rows
+     */
 
     tft35_write_cmd(ctx, 0x2A);
     tft35_write_data16(ctx, 0);
@@ -145,53 +174,72 @@ static void tft35_test_pattern(struct tft35 *ctx)
 
     for (y = 0; y < 480; y++) {
         for (x = 0; x < 320; x++) {
-            if (x < 4 || x >= 316 || y < 4 || y >= 476) {
-                color = 0xFFFF;
-            }
-            else if (y < 320) {
-                color = bars[x / 40];
-            }
-            else {
-                if (((x / 20) + ((y - 320) / 20)) & 1)
-                    color = 0xFFFF;
-                else
-                    color = 0x0000;
-            }
 
-            if ((x >= 158 && x <= 161) ||
-                (y >= 238 && y <= 241))
-                color = 0xFFFF;
+            if (x < 160 && y < 240)
+                color = 0xF800;   /* red */
+
+            else if (x >= 160 && y < 240)
+                color = 0x07E0;   /* green */
+
+            else if (x < 160)
+                color = 0x001F;   /* blue */
+
+            else
+                color = 0xFFFF;   /* white */
 
             tft35_write_data16(ctx, color);
         }
     }
 }
 
-static int tft35_write_buffer(struct tft35 *ctx, const void *buf, size_t len)
+static int tft35_write_buffer(struct tft35 *ctx,
+                              const void *buf,
+                              size_t len)
 {
-    int ret = 0;
+    const u8 *p = buf;
+    const size_t chunk_size = 16 * 1024;
     size_t sent = 0;
-    const uint8_t *p = buf;
-    const size_t chunk = 16 * 1024;
+    int ret;
 
     gpiod_set_value_cansleep(ctx->dc_gpio, 1);
 
     while (sent < len) {
-        size_t this_len = min_t(size_t, chunk, len - sent);
-        ret = spi_write(ctx->spi, p + sent, this_len);
-        if (ret < 0) {
-            dev_err(ctx->dev, "tft35_write_data: spi_write failed at %zu/%zu: %d\n",
-                    sent, len, ret);
+        size_t this_len;
+        struct spi_transfer transfer = {
+            .bits_per_word = 8,
+        };
+
+        this_len = min_t(size_t,
+                         chunk_size,
+                         len - sent);
+
+        transfer.tx_buf = p + sent;
+        transfer.len = this_len;
+
+        ret = spi_sync_transfer(ctx->spi,
+                                &transfer,
+                                1);
+
+        if (ret) {
+            dev_err(ctx->dev,
+                    "pixel SPI transfer failed "
+                    "at %zu/%zu: %d\n",
+                    sent,
+                    len,
+                    ret);
             return ret;
         }
+
         sent += this_len;
     }
+
     return 0;
 }
 
 static int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int height)
 {
     int ret;
+    /* Set window (column + row address) */
     tft35_write_cmd(ctx, 0x2A);
     tft35_write_data16(ctx, 0);
     tft35_write_data16(ctx, width - 1);
@@ -200,8 +248,10 @@ static int tft35_spi_write_pixels(struct tft35 *ctx, void *buf, int width, int h
     tft35_write_data16(ctx, 0);
     tft35_write_data16(ctx, height - 1);
 
+    // Memory write
     tft35_write_cmd(ctx, 0x2C);
 
+    /* Send pixel buffer */
     size_t len = width * height * 2;
     ret = tft35_write_buffer(ctx, buf, len);
     return ret;
@@ -270,6 +320,7 @@ static void convert_line_xrgb8888_to_rgb565_be(u8 *dst,
                                                bool swap_rb)
 {
     unsigned int x;
+
     for (x = 0; x < width; x++) {
         u32 px;
         u8 r, g, b;
@@ -292,6 +343,7 @@ static void convert_line_xrgb8888_to_rgb565_be(u8 *dst,
                  ((g & 0xfc) << 3) |
                  (b >> 3);
 
+        /* Big-endian RGB565 for SPI */
         dst[x * 2 + 0] = (rgb565 >> 8) & 0xff;
         dst[x * 2 + 1] = rgb565 & 0xff;
     }
@@ -305,7 +357,6 @@ static void copy_line_rgb565_to_be(u8 *dst,
 
     for (x = 0; x < width; x++) {
         u16 px;
-
 
         memcpy(&px, src + x * 2, sizeof(px));
 
@@ -321,22 +372,26 @@ static void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
     struct drm_plane_state *pstate = pipe->plane.state;
     struct drm_framebuffer *fb;
     struct drm_rect src_rect;
-    struct drm_gem_object *obj;
-    struct drm_gem_shmem_object *shmem;
-    struct iosys_map src_map = IOSYS_MAP_INIT_VADDR(NULL);
+
+    struct iosys_map map[DRM_FORMAT_MAX_PLANES];
+    struct iosys_map data[DRM_FORMAT_MAX_PLANES];
+
     unsigned int src_stride;
     unsigned int dst_stride;
     unsigned int src_x;
     unsigned int src_y;
     unsigned int y;
+
     int bpp_bytes;
     int w;
     int h;
     int ret;
+
     size_t required_len;
-    const u8 *gem_base;
+
     const u8 *src_base;
     u8 *dst_base;
+
     bool swap_rb;
 
     (void)old_plane_state;
@@ -369,53 +424,65 @@ static void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         break;
 
     default:
-        pr_debug("tft35: unsupported framebuffer format 0x%08x\n",
-                 fb->format->format);
+        pr_err("tft35: unsupported format 0x%08x\n",
+               fb->format->format);
         return;
     }
 
+    src_stride = fb->pitches[0];
     dst_stride = w * 2;
+
     required_len = (size_t)dst_stride * h;
 
     if (!ctx->tx_buf)
         return;
 
-    pr_debug("tft35_pipe_update: fb=%u fmt=0x%08x "
-             "w=%d h=%d bpp=%d dst_stride=%u required_len=%zu\n",
-             fb->base.id,
-             fb->format->format,
-             w,
-             h,
-             bpp_bytes,
-             dst_stride,
-             required_len);
-
-    obj = drm_gem_fb_get_obj(fb, 0);
-    if (!obj)
-        return;
-
-    shmem = to_drm_gem_shmem_obj(obj);
-
-    ret = drm_gem_shmem_vmap_locked(shmem, &src_map);
-    if (ret) {
-        pr_debug("tft35: failed to vmap framebuffer: %d\n", ret);
+    if (required_len > ctx->tx_buf_size) {
+        pr_err("tft35: tx buffer too small: %zu > %zu\n",
+               required_len,
+               ctx->tx_buf_size);
         return;
     }
 
-    if (!src_map.vaddr)
-        goto out_unmap;
+    /*
+     * Important for buffers produced by the GPU / imported DMA-BUF.
+     */
+    ret = drm_gem_fb_begin_cpu_access(fb, DMA_FROM_DEVICE);
+    if (ret) {
+        pr_err("tft35: begin_cpu_access failed: %d\n", ret);
+        return;
+    }
 
-    src_stride = fb->pitches[0];
+    memset(map, 0, sizeof(map));
+    memset(data, 0, sizeof(data));
+
+    /*
+     * Generic GEM framebuffer mapping.
+     *
+     * 'data' already includes fb->offsets[].
+     */
+    ret = drm_gem_fb_vmap(fb, map, data);
+    if (ret) {
+        pr_err("tft35: drm_gem_fb_vmap failed: %d\n", ret);
+        goto out_cpu_access;
+    }
+
+    if (iosys_map_is_null(&data[0])) {
+        pr_err("tft35: framebuffer mapping is NULL\n");
+        goto out_unmap;
+    }
 
     src_x = src_rect.x1 >> 16;
     src_y = src_rect.y1 >> 16;
 
-    gem_base = src_map.vaddr;
-
-    src_base = gem_base +
-               fb->offsets[0] +
-               (size_t)src_y * src_stride +
-               (size_t)src_x * bpp_bytes;
+    /*
+     * drm_gem_fb_vmap(..., data) already applies
+     * fb->offsets[0], so DON'T add it again here.
+     */
+    src_base =
+        data[0].vaddr +
+        (size_t)src_y * src_stride +
+        (size_t)src_x * bpp_bytes;
 
     dst_base = ctx->tx_buf;
 
@@ -423,29 +490,59 @@ static void tft35_pipe_update(struct drm_simple_display_pipe *pipe,
         fb->format->format == DRM_FORMAT_XBGR8888 ||
         fb->format->format == DRM_FORMAT_ABGR8888;
 
-    for (y = 0; y < h; y++) {
-        const u8 *src_line;
-        u8 *dst_line;
+    pr_debug(
+        "tft35: fb=%u fmt=%p4cc "
+        "modifier=0x%016llx "
+        "w=%d h=%d "
+        "pitch=%u dst_stride=%u "
+        "src_x=%u src_y=%u "
+        "imported=%d\n",
+        fb->base.id,
+        &fb->format->format,
+        (unsigned long long)fb->modifier,
+        w,
+        h,
+        src_stride,
+        dst_stride,
+        src_x,
+        src_y,
+        drm_gem_is_imported(drm_gem_fb_get_obj(fb, 0)));
 
-        src_line = src_base + (size_t)y * src_stride;
-        dst_line = dst_base + (size_t)y * dst_stride;
+    for (y = 0; y < h; y++) {
+        const u8 *src_line =
+            src_base + (size_t)y * src_stride;
+
+        u8 *dst_line =
+            dst_base + (size_t)y * dst_stride;
 
         if (bpp_bytes == 4) {
-            convert_line_xrgb8888_to_rgb565_be(dst_line,
-                                               src_line,
-                                               w,
-                                               swap_rb);
+            convert_line_xrgb8888_to_rgb565_be(
+                dst_line,
+                src_line,
+                w,
+                swap_rb);
         } else {
-            copy_line_rgb565_to_be(dst_line,
-                                   src_line,
-                                   w);
+            copy_line_rgb565_to_be(
+                dst_line,
+                src_line,
+                w);
         }
     }
 
-    tft35_spi_write_pixels(ctx, ctx->tx_buf, w, h);
+    ret = tft35_spi_write_pixels(ctx,
+                                 ctx->tx_buf,
+                                 w,
+                                 h);
+
+    if (ret)
+        pr_err("tft35: SPI framebuffer write failed: %d\n",
+               ret);
 
 out_unmap:
-    drm_gem_shmem_vunmap_locked(shmem, &src_map);
+    drm_gem_fb_vunmap(fb, map);
+
+out_cpu_access:
+    drm_gem_fb_end_cpu_access(fb, DMA_FROM_DEVICE);
 }
 
 static const struct drm_simple_display_pipe_funcs dsdp_funcs = {
@@ -586,6 +683,8 @@ static int tft35_probe(struct spi_device *spi)
     if (err < 0)
         return err;
 
+    /* KMS will update the framebuffer after registration. */
+    /* tft35_fill_color(ctx, 0x07E0); */
     tft35_test_pattern(ctx);
 
     return 0;
